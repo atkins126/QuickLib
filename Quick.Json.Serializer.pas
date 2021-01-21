@@ -7,7 +7,7 @@
   Author      : Kike Pérez
   Version     : 1.12
   Created     : 21/05/2018
-  Modified    : 16/06/2020
+  Modified    : 12/01/2020
 
   This file is part of QuickLib: https://github.com/exilon/QuickLib
 
@@ -1188,7 +1188,7 @@ begin
     Exit;
   end;
 
-  Result := TJSONObject.Create;
+  Result := nil;
   try
     //if is GenericList
     if IsGenericList(aObject) then
@@ -1201,7 +1201,8 @@ begin
       Result := TJSONObject(SerializeValue(propvalue));
       {$ENDIF}
       Exit;
-    end;
+    end
+    else Result := TJSONObject.Create;
     //if is standard object
     propertyname := '';
     rType := ctx.GetType(aObject.ClassInfo);
@@ -1263,7 +1264,7 @@ begin
   except
     on E : Exception do
     begin
-      Result.Free;
+      if Result <> nil then Result.Free;
       if not propertyname.IsEmpty then raise EJsonSerializeError.CreateFmt('Serialize Error -> Object property: "%s" (%s)',[propertyname,e.Message])
        else raise EJsonSerializeError.CreateFmt('Serialize Error -> Object (%s)',[e.Message]);
     end;
