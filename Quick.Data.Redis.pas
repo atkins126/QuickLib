@@ -1,13 +1,13 @@
 { ***************************************************************************
 
-  Copyright (c) 2015-2020 Kike Pérez
+  Copyright (c) 2015-2021 Kike Pérez
 
   Unit        : Quick.Data.Redis
   Description : Redis client
   Author      : Kike Pérez
   Version     : 1.0
   Created     : 22/02/2020
-  Modified    : 12/07/2020
+  Modified    : 03/03/2021
 
   This file is part of QuickLib: https://github.com/exilon/QuickLib
 
@@ -194,7 +194,12 @@ end;
 
 procedure TRedisClient.Disconnect;
 begin
-  if fConnected then RedisQUIT;
+  if fTCPClient.Connected then
+  begin
+    RedisQUIT;
+    fTCPClient.IOHandler.InputBuffer.Clear;
+    fTCPClient.IOHandler.WriteBufferFlush;
+  end;
   fConnected := False;
 end;
 
@@ -234,6 +239,8 @@ function TRedisClient.EscapeString(const json: string): string;
 begin
   Result := StringReplace(json,'\','\\',[rfReplaceAll]);
   Result := StringReplace(Result,'"','\"',[rfReplaceAll]);
+  Result := StringReplace(Result,#13,'\r',[rfReplaceAll]);
+  Result := StringReplace(Result,#10,'\n',[rfReplaceAll]);
   //Result := StringReplace(Result,'/','\/"',[rfReplaceAll]);
 end;
 
@@ -353,7 +360,7 @@ begin
     fTCPClient.IOHandler.ReadLn; //key
     fTCPClient.IOHandler.ReadLn; //$int
     oValue := fTCPClient.IOHandler.ReadLn; //value
-    Result := True;
+    if not oValue.IsEmpty then Result := True;
   end
   else
   begin
@@ -365,11 +372,12 @@ function TRedisClient.RedisBRPOPLPUSH(const aKey, aKeyToMove: string; out oValue
 var
   response : IRedisResponse;
 begin
+  Result := False;
   response := Command('BRPOPLPUSH','%s %s %d',[aKey,aKeyToMove,aWaitTimeoutSecs]);
   if response.IsDone then
   begin
     oValue := fTCPClient.IOHandler.ReadLn; //value
-    Result := True;
+    if not oValue.IsEmpty then Result := True;
   end
   else raise ERedisCommandError.CreateFmt('BRPOPLPUSH Error: %s',[response.Response]);
 end;
@@ -506,7 +514,7 @@ end;
 
 function TRedisClient.RedisLREM(const aKey, aValue: string; aNumOccurrences: Integer): Boolean;
 begin
-  Result := Command('LREM','%s "%s" %d',[aKey,EscapeString(aValue),aNumOccurrences * -1]).IsDone;
+  Result := Command('LREM','%s %d "%s"',[aKey,aNumOccurrences * -1,EscapeString(aValue)]).IsDone;
 end;
 
 function TRedisClient.RedisLTRIM(const aKey : string; aFirstElement, aMaxSize : Int64) : Boolean;

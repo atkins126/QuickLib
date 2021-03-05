@@ -302,6 +302,10 @@ type
   function GetLoggedUserName : string;
   //returns computer name
   function GetComputerName : string;
+  //check if remote desktop session
+  {$IFDEF MSWINDOWS}
+  function IsRemoteSession : Boolean;
+  {$ENDIF}
   //extract domain and user name from user login
   function ExtractDomainAndUser(const aUser : string; out oDomain, oUser : string) : Boolean;
   //Changes incorrect delims in path
@@ -347,11 +351,11 @@ type
   //save stream to file
   procedure SaveStreamToFile(aStream : TStream; const aFilename : string);
   //save stream to string
-  function StreamToString(aStream : TStream) : string;
-  function StreamToString2(const aStream: TStream; const aEncoding: TEncoding): string;
+  function StreamToString(const aStream: TStream; const aEncoding: TEncoding): string;
+  function StreamToStringEx(aStream : TStream) : string;
   //save string to stream
-  procedure StringToStream(const aStr : string; aStream : TStream);
-  procedure StringToStream2(const aStr : string; aStream : TStream);
+  procedure StringToStream(const aStr : string; aStream : TStream; const aEncoding: TEncoding);
+  procedure StringToStreamEx(const aStr : string; aStream : TStream);
   //returns a real comma separated text from stringlist
   function CommaText(aList : TStringList) : string; overload;
   //returns a real comma separated text from array of string
@@ -994,6 +998,16 @@ function GetComputerName : string;
   {$ENDIF}
 {$ENDIF}
 
+{$IFDEF MSWINDOWS}
+function IsRemoteSession : Boolean;
+const
+  SM_REMOTECONTROL      = $2001;
+  SM_REMOTESESSION      = $1000;
+begin
+  Result := (GetSystemMetrics(SM_REMOTESESSION) <> 0) or (GetSystemMetrics(SM_REMOTECONTROL) <> 0);
+end;
+{$ENDIF}
+
 function ExtractDomainAndUser(const aUser : string; out oDomain, oUser : string) : Boolean;
 begin
   //check if domain specified into username
@@ -1021,9 +1035,12 @@ begin
 end;
 
 function CombinePaths(const aFirstPath, aSecondPath: string; aDelim : Char): string;
+var
+  path1 : string;
+  path2 : string;
 begin
-  var path1 := NormalizePathDelim(aFirstPath,aDelim);
-  var path2 := NormalizePathDelim(aSecondPath,aDelim);
+  path1 := NormalizePathDelim(aFirstPath,aDelim);
+  path2 := NormalizePathDelim(aSecondPath,aDelim);
   if path1.EndsWith(aDelim) then
   begin
     if path2.StartsWith(aDelim) then Result := path1 + path2.Substring(1)
@@ -1484,7 +1501,17 @@ begin
   end;
 end;
 
-function StreamToString(aStream : TStream) : string;
+function StreamToString(const aStream: TStream; const aEncoding: TEncoding): string;
+var
+  sbytes: TBytes;
+begin
+  aStream.Position := 0;
+  SetLength(sbytes, aStream.Size);
+  aStream.ReadBuffer(sbytes,aStream.Size);
+  Result := aEncoding.GetString(sbytes);
+end;
+
+function StreamToStringEx(aStream : TStream) : string;
 var
   ss : TStringStream;
 begin
@@ -1511,27 +1538,11 @@ begin
   end;
 end;
 
-function StreamToString2(const aStream: TStream; const aEncoding: TEncoding): string;
-var
-  sbytes: TBytes;
-begin
-  aStream.Position := 0;
-  SetLength(sbytes, aStream.Size);
-  aStream.ReadBuffer(sbytes,aStream.Size);
-  Result := aEncoding.GetString(sbytes);
-end;
-
-procedure StringToStream(const aStr : string; aStream : TStream);
-begin
-  aStream.Seek(0,soBeginning);
-  aStream.WriteBuffer(Pointer(aStr)^,aStr.Length * SizeOf(Char));
-end;
-
-procedure StringToStream2(const aStr : string; aStream : TStream);
+procedure StringToStream(const aStr : string; aStream : TStream; const aEncoding: TEncoding);
 var
   stream : TStringStream;
 begin
-  stream := TStringStream.Create(aStr,TEncoding.UTF8);
+  stream := TStringStream.Create(aStr,aEncoding);
   try
     aStream.CopyFrom(stream,stream.Size);
   finally
@@ -1539,6 +1550,11 @@ begin
   end;
 end;
 
+procedure StringToStreamEx(const aStr : string; aStream : TStream);
+begin
+  aStream.Seek(0,soBeginning);
+  aStream.WriteBuffer(Pointer(aStr)^,aStr.Length * SizeOf(Char));
+end;
 
 function CommaText(aList : TStringList) : string;
 var
