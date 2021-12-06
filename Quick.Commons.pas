@@ -1,13 +1,13 @@
-{ ***************************************************************************
+ï»¿{ ***************************************************************************
 
-  Copyright (c) 2016-2021 Kike Pérez
+  Copyright (c) 2016-2021 Kike Pï¿½rez
 
   Unit        : Quick.Commons
   Description : Common functions
-  Author      : Kike Pérez
+  Author      : Kike Pï¿½rez
   Version     : 2.0
   Created     : 14/07/2017
-  Modified    : 02/06/2021
+  Modified    : 03/10/2021
 
   This file is part of QuickLib: https://github.com/exilon/QuickLib
 
@@ -39,6 +39,7 @@ interface
     Types,
     {$IFDEF MSWINDOWS}
       Windows,
+      ActiveX,
       ShlObj,
     {$ENDIF MSWINDOWS}
     {$IFDEF FPC}
@@ -86,9 +87,9 @@ const
   LOG_ALL = [etInfo, etSuccess, etWarning, etError, etDebug, etDone, etTrace, etCritical, etException];
   LOG_DEBUG = [etInfo,etSuccess,etWarning,etError,etDebug];
   {$IFDEF DELPHIXE7_UP}
-  EventStr : array of string = ['INFO','SUCC','WARN','ERROR','DEBUG','TRACE'];
+  EventStr : array of string = ['INFO','SUCC','WARN','ERROR','DEBUG','DONE','TRACE','CRITICAL','EXCEPTION'];
   {$ELSE}
-  EventStr : array[0..5] of string = ('INFO','SUCC','WARN','ERROR','DEBUG','TRACE');
+  EventStr : array[0..8] of string = ('INFO','SUCC','WARN','ERROR','DEBUG','DONE','TRACE','CRITICAL','EXCEPTION');
   {$ENDIF}
 type
   TPasswordComplexity = set of (pfIncludeNumbers,pfIncludeSigns);
@@ -225,6 +226,47 @@ type
     procedure FromArray(aValue : TArray<TPairItem>);
     procedure Clear;
   end;
+
+  {$IFDEF DELPHIXE7_UP}
+  TDateTimeHelper = record helper for TDateTime
+  public
+    function ToSQLString : string;
+    procedure FromNow;
+    procedure FromUTC(const aUTCTime : TDateTime);
+    function IncDay(const aValue : Cardinal = 1) : TDateTime;
+    function DecDay(const aValue : Cardinal = 1) : TDateTime;
+    function IncMonth(const aValue : Cardinal = 1) : TDateTime;
+    function DecMonth(const aValue : Cardinal = 1) : TDateTime;
+    function IncYear(const aValue : Cardinal = 1) : TDateTime;
+    function DecYear(const aValue : Cardinal = 1) : TDateTime;
+    function IsEqualTo(const aDateTime : TDateTime) : Boolean;
+    function IsAfter(const aDateTime : TDateTime) : Boolean;
+    function IsBefore(const aDateTime : TDateTime) : Boolean;
+    function IsSameDay(const aDateTime : TDateTime) : Boolean;
+    function IsSameTime(const aTime : TTime) : Boolean;
+    function DayOfTheWeek : Word;
+    function ToJsonFormat : string;
+    function ToGMTFormat: string;
+    function ToTimeStamp : TTimeStamp;
+    function ToUTC : TDateTime;
+    function ToMilliseconds : Int64;
+    function ToString : string;
+    function Date : TDate;
+    function Time : TTime;
+    function IsAM : Boolean;
+    function IsPM : Boolean;
+  end;
+
+  TDateHelper = record helper for TDate
+  public
+    function ToString : string;
+  end;
+
+  TTimeHelper = record helper for TTime
+  public
+    function ToString : string;
+  end;
+  {$ENDIF}
 
   EEnvironmentPath = class(Exception);
   EShellError = class(Exception);
@@ -400,6 +442,7 @@ type
   //get simple quoted or dequoted string
   function SpQuotedStr(const str : string): string;
   function UnSpQuotedStr(const str : string): string;
+  function UnQuotedStr(const str : string; const aQuote : Char) : string;
   //ternary operator
   function Ifx(aCondition : Boolean; const aIfIsTrue, aIfIsFalse : string) : string; overload;
   function Ifx(aCondition : Boolean; const aIfIsTrue, aIfIsFalse : Integer) : Integer; overload;
@@ -596,7 +639,6 @@ function UrlGetPath(const aUrl : string) : string;
 var
   url : string;
   len : Integer;
-  query : Integer;
 begin
   url := UrlRemoveProtocol(aUrl);
   if not url.Contains('/') then Exit('');
@@ -667,15 +709,25 @@ end;
 {$IFDEF MSWINDOWS}
 function GetSpecialFolderPath(folderID : Integer) : string;
 var
+  shellMalloc: IMalloc;
   ppidl: PItemIdList;
 begin
-  SHGetSpecialFolderLocation(0, folderID, ppidl);
-  SetLength(Result, MAX_PATH);
-  if not SHGetPathFromIDList(ppidl,{$IFDEF FPC}PAnsiChar(Result){$ELSE}PChar(Result){$ENDIF}) then
-  begin
-    raise EShellError.create(Format('GetSpecialFolderPath: Invalid PIPL (%d)',[folderID]));
+  ppidl := nil;
+  try
+    if SHGetMalloc(shellMalloc) = NOERROR then
+    begin
+      SHGetSpecialFolderLocation(0, folderID, ppidl);
+      SetLength(Result, MAX_PATH);
+      if not SHGetPathFromIDList(ppidl,{$IFDEF FPC}PAnsiChar(Result){$ELSE}PChar(Result){$ENDIF}) then
+      begin
+        raise EShellError.create(Format('GetSpecialFolderPath: Invalid PIPL (%d)',[folderID]));
+      end;
+      SetLength(Result, lStrLen({$IFDEF FPC}PAnsiChar(Result){$ELSE}PChar(Result){$ENDIF}));
+    end;
+  finally
+    if ppidl <> nil then
+      shellMalloc.Free(ppidl);
   end;
-  SetLength(Result, lStrLen({$IFDEF FPC}PAnsiChar(Result){$ELSE}PChar(Result){$ENDIF}));
 end;
 
 function Is64bitOS : Boolean;
@@ -704,7 +756,10 @@ function HasConsoleOutput : Boolean;
   begin
     try
       stout := GetStdHandle(Std_Output_Handle);
-      Win32Check(stout <> Invalid_Handle_Value);
+      {$WARN SYMBOL_PLATFORM OFF}
+      //Allready checked that we are on a windows platform
+        Win32Check(stout <> Invalid_Handle_Value);
+      {$WARN SYMBOL_PLATFORM ON}
       Result := stout <> 0;
     except
       Result := False;
@@ -2023,7 +2078,7 @@ end;
 
 function DateTimeToSQL(aDateTime : TDateTime) : string;
 begin
-  Result := FormatDateTime('YYYYMMDD hh:mm:ss',aDateTime);
+  Result := FormatDateTime('YYYY-MM-DD hh:mm:ss',aDateTime);
 end;
 
 function IsInteger(const aValue : string) : Boolean;
@@ -2099,6 +2154,12 @@ begin
   end;
 end;
 
+function UnQuotedStr(const str : string; const aQuote : Char) : string;
+begin
+  if (str.Length > 0) and (str[Low(str)] = aQuote) and (str[High(str)] = aQuote) then Result := Copy(str, Low(str)+1, High(str) - 2)
+    else Result := str;
+end;
+
 function Ifx(aCondition : Boolean; const aIfIsTrue, aIfIsFalse : string) : string;
 begin
   if aCondition then Result := aIfIsTrue else Result := aIfIsFalse;
@@ -2136,6 +2197,151 @@ end;
   {$ENDIF}
 {$ENDIF}
 
+{ TDateTimeHelper }
+
+{$IFDEF DELPHIXE7_UP}
+function TDateTimeHelper.ToSQLString : string;
+begin
+  Result := DateTimeToSQL(Self);
+end;
+
+procedure TDateTimeHelper.FromNow;
+begin
+  Self := Now;
+end;
+
+procedure TDateTimeHelper.FromUTC(const aUTCTime: TDateTime);
+begin
+  Self := UTCToLocalTime(aUTCTime);
+end;
+
+function TDateTimeHelper.IncDay(const aValue : Cardinal = 1) : TDateTime;
+begin
+  Result := System.DateUtils.IncDay(Self,aValue);
+end;
+
+function TDateTimeHelper.DecDay(const aValue : Cardinal = 1) : TDateTime;
+begin
+  Result := System.DateUtils.IncDay(Self,-aValue);
+end;
+
+function TDateTimeHelper.IncMonth(const aValue : Cardinal = 1) : TDateTime;
+begin
+  Result := SysUtils.IncMonth(Self,aValue);
+end;
+
+function TDateTimeHelper.DecMonth(const aValue : Cardinal = 1) : TDateTime;
+begin
+  Result := SysUtils.IncMonth(Self,-aValue);
+end;
+
+function TDateTimeHelper.IncYear(const aValue : Cardinal = 1) : TDateTime;
+begin
+  Result := System.DateUtils.IncYear(Self,aValue);
+end;
+
+function TDateTimeHelper.DecYear(const aValue : Cardinal = 1) : TDateTime;
+begin
+  Result := System.DateUtils.IncYear(Self,-aValue);
+end;
+
+function TDateTimeHelper.IsEqualTo(const aDateTime : TDateTime) : Boolean;
+begin
+  Result := Self = aDateTime;
+end;
+
+function TDateTimeHelper.IsAfter(const aDateTime : TDateTime) : Boolean;
+begin
+  Result := Self > aDateTime;
+end;
+
+function TDateTimeHelper.IsBefore(const aDateTime : TDateTime) : Boolean;
+begin
+  Result := Self < aDateTime;
+end;
+
+function TDateTimeHelper.IsSameDay(const aDateTime : TDateTime) : Boolean;
+begin
+  Result := System.DateUtils.SameDate(Self,aDateTime);
+end;
+
+function TDateTimeHelper.IsSameTime(const aTime : TTime) : Boolean;
+begin
+  Result := System.DateUtils.SameTime(Self,aTime);
+end;
+
+function TDateTimeHelper.DayOfTheWeek : Word;
+begin
+  Result := System.DateUtils.NthDayOfWeek(Self);
+end;
+
+function TDateTimeHelper.ToJsonFormat : string;
+begin
+  Result := DateTimeToJsonDate(Self);
+end;
+
+function TDateTimeHelper.ToGMTFormat : string;
+begin
+  Result := DateTimeToGMT(Self);
+end;
+
+function TDateTimeHelper.ToTimeStamp : TTimeStamp;
+begin
+  Result := DateTimeToTimeStamp(Self);
+end;
+
+function TDateTimeHelper.ToUTC : TDateTime;
+begin
+  Result := LocalTimeToUTC(Self);
+end;
+
+function TDateTimeHelper.ToMilliseconds : Int64;
+begin
+  {$IFDEF DELPHIRX104_ANDUP}
+  Result := System.DateUtils.DateTimeToMilliseconds(Self);
+  {$ELSE}
+  Result := System.DateUtils.MilliSecondOf(Self);
+  {$ENDIF}
+end;
+
+function TDateTimeHelper.ToString : string;
+begin
+  Result := DateTimeToStr(Self);
+end;
+
+function TDateTimeHelper.Date : TDate;
+begin
+  Result := System.DateUtils.DateOf(Self);
+end;
+
+function TDateTimeHelper.Time : TTime;
+begin
+  Result := System.DateUtils.TimeOf(Self);
+end;
+
+function TDateTimeHelper.IsAM : Boolean;
+begin
+  Result := System.DateUtils.IsAM(Self);
+end;
+
+function TDateTimeHelper.IsPM : Boolean;
+begin
+  Result := System.DateUtils.IsPM(Self);
+end;
+
+{ TDateHelper }
+function TDateHelper.ToString : string;
+begin
+  Result := DateToStr(Self);
+end;
+
+{ TTimeHelper }
+function TTimeHelper.ToString : string;
+begin
+  Result := TimeToStr(Self);
+end;
+{$ENDIF}
+
 {$IFNDEF NEXTGEN}
 initialization
   try
@@ -2154,6 +2360,8 @@ initialization
   end;
 {$ENDIF}
 
+
 end.
+
 
 
