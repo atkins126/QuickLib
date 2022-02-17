@@ -1,13 +1,13 @@
 { ***************************************************************************
 
-  Copyright (c) 2015-2021 Kike Pérez
+  Copyright (c) 2015-2022 Kike Pérez
 
   Unit        : Quick.JSON.Serializer
   Description : Json Serializer
   Author      : Kike Pérez
   Version     : 1.12
   Created     : 21/05/2018
-  Modified    : 03/10/2021
+  Modified    : 26/01/2022
 
   This file is part of QuickLib: https://github.com/exilon/QuickLib
 
@@ -131,16 +131,18 @@ type
     fUseBase64Stream : Boolean;
     fUseNullStringsAsEmpty : Boolean;
     function GetValue(aAddr: Pointer; aType: TRTTIType): TValue; overload;
+    {$IFDEF FPC}
     function GetValue(aAddr: Pointer; aTypeInfo: PTypeInfo): TValue; overload;
+    {$ENDIF}
     function IsAllowedProperty(aObject : TObject; const aPropertyName : string) : Boolean;
-    function GetPropertyValue(Instance : TObject; const PropertyName : string) : TValue;
+    //function GetPropertyValue(Instance : TObject; const PropertyName : string) : TValue;
     function GetPropertyValueFromObject(Instance : TObject; const PropertyName : string) : TValue;
     {$IFNDEF FPC}
     function GetFieldValueFromRecord(const aValue : TValue; const FieldName : string) : TValue;
     {$ENDIF}
+    {$IFDEF FPC}
     procedure SetPropertyValue(Instance : TObject; aPropInfo : PPropInfo; aValue : TValue); overload;
     procedure SetPropertyValue(Instance : TObject; const PropertyName : string; aValue : TValue); overload;
-    {$IFDEF FPC}
     function FloatProperty(aObject : TObject; aPropInfo: PPropInfo): string;
     function GetPropType(aPropInfo: PPropInfo): PTypeInfo;
     procedure LoadSetProperty(aInstance : TObject; aPropInfo: PPropInfo; const aValue: string);
@@ -210,7 +212,7 @@ type
     property UseEnumNames : Boolean read fUseEnumNames write SetUseEnumNames;
     property UseJsonCaseSense : Boolean read fUseJsonCaseSense write SetUseJsonCaseSense;
     property UseBase64Stream : Boolean read fUseBase64Stream write SetUseBase64Stream;
-    property UseNullStringsAsEmpty : Boolean read fUseNullStringsAsEmpty write fUseNullStringsAsEmpty;
+    property UseNullStringsAsEmpty : Boolean read fUseNullStringsAsEmpty write SetUseNullStringsAsEmpty;
     function JsonToObject(aType : TClass; const aJson: string) : TObject; overload;
     function JsonToObject(aObject : TObject; const aJson: string) : TObject; overload;
     function JsonStreamToObject(aObject : TObject; aJsonStream : TStream) : TObject;
@@ -299,7 +301,7 @@ begin
           end
       else
         begin
-          rItemValue := DeserializeType(aObject,rType.Kind,aTypeInfo,aJsonArray.Items[i].Value);
+          rItemValue := DeserializeType(aObject,rType.Kind,rType,aJsonArray.Items[i].Value);
         end;
       end;
       if not rItemValue.IsEmpty then Result.SetArrayElement(i,rItemValue);
@@ -463,6 +465,7 @@ begin
   finally
     stream.Free;
   end;
+  Result := aObject;
 end;
 
 constructor TRTTIJson.Create(aSerializeLevel : TSerializeLevel; aUseEnumNames : Boolean = True);
@@ -587,7 +590,7 @@ begin
             if IsGenericList(propvalue.AsObject) then DeserializeList(propvalue.AsObject,'List',TJSONObject(aJson.GetValue(propertyname)))
             else Result := DeserializeProperty(Result,propertyname,rProp,aJson);
           end
-          else if IsGenericXArray(propvalue{$IFNDEF NEXTGEN}.TypeInfo.Name{$ELSE}.TypeInfo.NameFld.ToString{$ENDIF}) then
+          else if IsGenericXArray(string(propvalue{$IFNDEF NEXTGEN}.TypeInfo.Name{$ELSE}.TypeInfo.NameFld.ToString{$ENDIF})) then
           begin
             DeserializeXArray(Result,propvalue,rProp,propertyname,aJson);
           end
@@ -617,10 +620,11 @@ var
   i : Integer;
   n : Integer;
   rProp : TRttiProperty;
-  {$IFNDEF DELPHIRX10_UP}
+  {$IFDEF DELPHIRX10_UP}
+  rMethod: TRttiMethod;
+  {$ELSE}
   rfield : TRttiField;
   {$ENDIF}
-  genericType : TGenericListType;
 begin
   Result := aObject;
 
@@ -651,17 +655,20 @@ begin
   if not rValue.IsEmpty then
   begin
     {$IFDEF DELPHIRX10_UP}
-    if (TObjectList<TObject>(aObject) <> nil) and (rvalue.IsArray) then
+    if (aObject <> nil) and (rvalue.IsArray) then
     begin
-      genericType := GetGenericListType(aObject);
-      if genericType = TGenericListType.gtObjectList then TObjectList<TObject>(aObject).Clear
-        else TList<TObject>(aObject).Clear;
+      rMethod := ctx.GetType(aObject.ClassType).GetMethod('Clear');
+      if rMethod = nil then
+        raise EJsonDeserializeError.Create('Unable to find RTTI method');
+      rMethod.Invoke(aObject, []);
+
+      rMethod := ctx.GetType(aObject.ClassType).GetMethod('Add');
+      if rMethod = nil then
+        raise EJsonDeserializeError.Create('Unable to find RTTI method');
+
       n := rvalue.GetArrayLength - 1;
       for i := 0 to n do
-      begin
-        if genericType = TGenericListType.gtObjectList then TObjectList<TObject>(aObject).Add(rvalue.GetArrayElement(i).AsObject)
-          else TList<TObject>(aObject).Add(rvalue.GetArrayElement(i).AsObject);
-      end;
+        rMethod.Invoke(aObject, [rvalue.GetArrayElement(i)]);
     end;
     {$ELSE}
     n := 0;
@@ -858,11 +865,13 @@ begin
         end;
       tkInteger :
         begin
-          Result := StrToInt(value);
+          if CompareText(value,'null') <> 0 then Result := StrToIntDef(value,0)
+            else Result := 0;
         end;
       tkInt64 :
         begin
-          Result := StrToInt64(value);
+          if CompareText(value,'null') <> 0 then Result := StrToInt64Def(value,0)
+           else Result := 0;
         end;
       tkFloat :
         begin
@@ -944,11 +953,13 @@ begin
         end;
       tkInteger :
         begin
-          Result := StrToInt(value);
+          if CompareText(value,'null') <> 0 then Result := StrToInt(value)
+            else Result := 0;
         end;
       tkInt64 :
         begin
-          Result := StrToInt64(value);
+          if CompareText(value,'null') <> 0 then Result := StrToInt64(value)
+            else Result := 0;
         end;
       tkFloat :
         begin
@@ -1089,49 +1100,49 @@ begin
   Result := nil;
 end;
 
-function TRTTIJson.GetPropertyValue(Instance : TObject; const PropertyName : string) : TValue;
-var
-  pinfo : PPropInfo;
-begin
-  Result := nil;
-  pinfo := GetPropInfo(Instance,PropertyName);
-  if pinfo = nil then raise EJsonSerializeError.CreateFmt('Property "%s" not found!',[PropertyName]);
-  case pinfo.PropType^.Kind of
-    tkInteger : Result := GetOrdProp(Instance,pinfo);
-    tkInt64 : Result := GetInt64Prop(Instance,PropertyName);
-    tkFloat : Result := GetFloatProp(Instance,PropertyName);
-    tkChar : Result := Char(GetOrdProp(Instance,PropertyName));
-    {$IFDEF FPC}
-    tkWString : Result := GetWideStrProp(Instance,PropertyName);
-    tkSString,
-    tkAString,
-    {$ELSE}
-    tkWString,
-    {$ENDIF}
-    tkLString : Result := GetStrProp(Instance,pinfo);
-    {$IFDEF FPC}
-    tkEnumeration :
-      begin
-        if fUseEnumNames then Result := GetEnumName(pinfo.PropType,GetOrdProp(Instance,PropertyName))
-          else Result := GetOrdProp(Instance,PropertyName);
-      end;
-    {$ELSE}
-    tkEnumeration :
-      begin
-        if fUseEnumNames then Result := GetEnumName(@pinfo.PropType,GetOrdProp(Instance,PropertyName))
-          else Result := GetOrdProp(Instance,PropertyName);
-      end;
-    {$ENDIF}
-    tkSet : Result := GetSetProp(Instance,pinfo,True);
-    {$IFNDEF FPC}
-    tkClass :
-    {$ELSE}
-    tkBool : Result := Boolean(GetOrdProp(Instance,pinfo));
-    tkObject :
-    {$ENDIF} Result := GetObjectProp(Instance,pinfo);
-    tkDynArray : Result := GetDynArrayProp(Instance,pinfo);
-  end;
-end;
+//function TRTTIJson.GetPropertyValue(Instance : TObject; const PropertyName : string) : TValue;
+//var
+//  pinfo : PPropInfo;
+//begin
+//  Result := nil;
+//  pinfo := GetPropInfo(Instance,PropertyName);
+//  if pinfo = nil then raise EJsonSerializeError.CreateFmt('Property "%s" not found!',[PropertyName]);
+//  case pinfo.PropType^.Kind of
+//    tkInteger : Result := GetOrdProp(Instance,pinfo);
+//    tkInt64 : Result := GetInt64Prop(Instance,PropertyName);
+//    tkFloat : Result := GetFloatProp(Instance,PropertyName);
+//    tkChar : Result := Char(GetOrdProp(Instance,PropertyName));
+//    {$IFDEF FPC}
+//    tkWString : Result := GetWideStrProp(Instance,PropertyName);
+//    tkSString,
+//    tkAString,
+//    {$ELSE}
+//    tkWString,
+//    {$ENDIF}
+//    tkLString : Result := GetStrProp(Instance,pinfo);
+//    {$IFDEF FPC}
+//    tkEnumeration :
+//      begin
+//        if fUseEnumNames then Result := GetEnumName(pinfo.PropType,GetOrdProp(Instance,PropertyName))
+//          else Result := GetOrdProp(Instance,PropertyName);
+//      end;
+//    {$ELSE}
+//    tkEnumeration :
+//      begin
+//        if fUseEnumNames then Result := GetEnumName(@pinfo.PropType,GetOrdProp(Instance,PropertyName))
+//          else Result := GetOrdProp(Instance,PropertyName);
+//      end;
+//    {$ENDIF}
+//    tkSet : Result := GetSetProp(Instance,pinfo,True);
+//    {$IFNDEF FPC}
+//    tkClass :
+//    {$ELSE}
+//    tkBool : Result := Boolean(GetOrdProp(Instance,pinfo));
+//    tkObject :
+//    {$ENDIF} Result := GetObjectProp(Instance,pinfo);
+//    tkDynArray : Result := GetDynArrayProp(Instance,pinfo);
+//  end;
+//end;
 
 function TRTTIJson.GetPropertyValueFromObject(Instance : TObject; const PropertyName : string) : TValue;
 var
@@ -1156,6 +1167,7 @@ begin
 end;
 {$ENDIF}
 
+{$IFDEF FPC}
 procedure TRTTIJson.SetPropertyValue(Instance : TObject; const PropertyName : string; aValue : TValue);
 var
   pinfo : PPropInfo;
@@ -1192,7 +1204,6 @@ begin
   end;
 end;
 
-{$IFDEF FPC}
 procedure TRTTIJson.LoadSetProperty(aInstance : TObject; aPropInfo: PPropInfo; const aValue: string);
 type
   TCardinalSet = set of 0..SizeOf(Cardinal) * 8 - 1;
@@ -1249,7 +1260,7 @@ begin
       //get list array
       propvalue := GetPropertyValueFromObject(aObject,'List');
       {$IFDEF DELPHIRX10_UP}
-      Result := TJSONObject(SerializeDynArray(propvalue,TList<TObject>(aObject).Count));
+      Result := TJSONObject(SerializeDynArray(propvalue));
       {$ELSE}
       Result := TJSONObject(SerializeValue(propvalue));
       {$ENDIF}
@@ -1298,7 +1309,7 @@ begin
 //            end
             if propvalue.IsObject then jpair.JsonValue := SerializeObject(propvalue.AsObject)
             {$IFNDEF FPC}
-            else if (not propvalue.IsObject) and (IsGenericXArray(propvalue{$IFNDEF NEXTGEN}.TypeInfo.Name{$ELSE}.TypeInfo.NameFld.ToString{$ENDIF})) then
+            else if (not propvalue.IsObject) and (IsGenericXArray(string(propvalue{$IFNDEF NEXTGEN}.TypeInfo.Name{$ELSE}.TypeInfo.NameFld.ToString{$ENDIF}))) then
             begin
               jpair.JsonValue := SerializeValue(GetFieldValueFromRecord(propvalue,'fArray'));
             end
@@ -1336,10 +1347,12 @@ begin
   TValue.Make(aAddr,aType.Handle,Result);
 end;
 
+{$IFDEF FPC}
 function TRTTIJson.GetValue(aAddr: Pointer; aTypeInfo: PTypeInfo): TValue;
 begin
   TValue.Make(aAddr,aTypeInfo,Result);
 end;
+{$ENDIF}
 
 function TRTTIJson.SerializeValue(const aValue : TValue) : TJSONValue;
 begin
@@ -1354,6 +1367,13 @@ begin
     tkClass :
       begin
          Result := TJSONValue(SerializeObject(aValue.AsObject));
+      end;
+    tkInterface :
+      begin
+        {$IFDEF DELPHIRX10_UP}
+        // Would not work with iOS/Android native interfaces
+        Result := TJSONValue(SerializeObject(aValue.AsInterface as TObject));
+        {$ENDIF}
       end;
     tkString, tkLString, tkWString, tkUString :
       begin
@@ -1434,7 +1454,7 @@ begin
         end;
         {$ENDIF}
       end;
-    tkMethod, tkPointer, tkClassRef ,tkInterface, tkProcedure, tkUnknown :
+    tkMethod, tkPointer, tkClassRef, tkProcedure, tkUnknown :
       begin
         //skip these properties
       end
@@ -1453,7 +1473,6 @@ end;
 function TRTTIJson.SerializeStream(aObject: TObject): TJSONValue;
 var
   stream : TStream;
-  json : string;
 begin
   Result := nil;
   try
