@@ -7,7 +7,7 @@
   Author      : Kike Pérez
   Version     : 1.12
   Created     : 21/05/2018
-  Modified    : 26/01/2022
+  Modified    : 18/02/2022
 
   This file is part of QuickLib: https://github.com/exilon/QuickLib
 
@@ -806,7 +806,8 @@ begin
           begin
             if aProperty.GetValue(aObject).TypeInfo = System.TypeInfo(TGUID) then
             begin
-              rValue:=TValue.From<TGUID>(StringToGUID(UnQuotedStr(member.ToJSON,'"')));
+              //get value from TGUID string with and without {} (more compatibility)
+              rValue:=TValue.From<TGUID>(StringToGUIDEx(UnQuotedStr(member.ToJSON,'"')));
             end
             else
             begin
@@ -1734,6 +1735,7 @@ end;
 
 function TJsonSerializer.JsonToObject(aType: TClass; const aJson: string): TObject;
 var
+  jvalue : TJSONValue;
   json: TJSONObject;
 begin
   {$IFDEF DEBUG_SERIALIZER}
@@ -1741,7 +1743,9 @@ begin
   {$ENDIF}
   try
     {$IFDEF DELPHIRX10_UP}
-    json := TJSONObject.ParseJSONValue(aJson,True) as TJSONObject;
+    jvalue := TJSONObject.ParseJSONValue(aJson,True);
+    if jvalue.ClassType = TJSONArray then json := TJSONObject(jvalue)
+      else json := jvalue as TJSONObject;
     {$ELSE}
      {$IFDEF FPC}
      json := TJSONObject(TJSONObject.ParseJSONValue(aJson,True));
