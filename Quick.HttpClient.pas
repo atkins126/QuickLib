@@ -147,9 +147,9 @@ var
   bodycontent : TStringStream;
   responsecontent : TStringStream;
 begin
-  bodycontent := TStringStream.Create;
+  bodycontent := TStringStream.Create('',TEncoding.UTF8);
   try
-    responsecontent := TStringStream.Create;
+    responsecontent := TStringStream.Create('',TEncoding.UTF8);
     try
       {$IFDEF DELPHIXE8_UP}
       resp := fHTTPClient.Get(aURL,responsecontent,nil);
@@ -185,7 +185,7 @@ begin
   postcontent := TStringStream.Create(Utf8Encode(aInContent));
   try
     //postcontent.WriteString(aInContent);
-    responsecontent := TStringStream.Create;
+    responsecontent := TStringStream.Create('',TEncoding.UTF8);
     try
       {$IFDEF DELPHIXE8_UP}
       if aHeaders <> nil then
@@ -238,7 +238,7 @@ var
   responsecontent : TStringStream;
 begin
   //postcontent.WriteString(aInContent);
-  responsecontent := TStringStream.Create;
+  responsecontent := TStringStream.Create('',TEncoding.UTF8);
   try
     {$IFDEF DELPHIXE8_UP}
     resp := fHTTPClient.Post(aURL,aInContent,responsecontent);
@@ -290,7 +290,7 @@ begin
   postcontent := TStringStream.Create(Utf8Encode(aInContent));
   try
     //postcontent.WriteString(aInContent);
-    responsecontent := TStringStream.Create;
+    responsecontent := TStringStream.Create('',TEncoding.UTF8);
     try
       {$IFDEF DELPHIXE8_UP}
       resp := fHTTPClient.Put(aURL,postcontent,responsecontent);
@@ -380,7 +380,9 @@ constructor THttpRequestResponse.Create(aResponse: IHTTPResponse; const aContent
 begin
   fStatusCode := aResponse.StatusCode;
   fStatusText := aResponse.StatusText;
-  if aContent <> '' then fResponse := TJSONObject.ParseJSONValue(aContent) as TJSONObject;
+  if ((aContent <> '') and
+      (aContent.StartsWith('{') or (aContent.StartsWith('[')))
+      ) then fResponse := TJSONObject.ParseJSONValue(aContent) as TJSONObject;
   //if response is not json, get as json result
   if fResponse = nil then
   begin
